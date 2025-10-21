@@ -48,24 +48,9 @@ Start-Sleep -Seconds 2
 Start-Process streamlit -ArgumentList "run ui/full_agent_app.py"
 ```
 
-**Option C: Batch File**
-```cmd
-START_SYSTEM.bat
-```
-
 ### 3. Access the Application
 
 Open your browser to: **http://localhost:8501**
-
-### 4. Verify Services
-
-```powershell
-# Check if servers are running
-python check_services.py
-
-# Verify analytics agent
-python verify_analytics_agent.py
-```
 
 ---
 
@@ -201,16 +186,6 @@ Get-Process python,streamlit -ErrorAction SilentlyContinue | Stop-Process -Force
 .\START_ALL.ps1
 ```
 
-### Analytics Agent Not Responding
-
-```powershell
-# Verify agent is registered
-python verify_analytics_agent.py
-
-# Check service status
-python check_services.py
-```
-
 ### Connection Issues
 
 - Ensure all services start in order (A2A → MCP → Agents → UI)
@@ -231,14 +206,10 @@ it_tickets_project/
 ├── mcp_server/
 │   └── real_mcp_server.py       # MCP tools server
 ├── ui/
-│   ├── full_agent_app.py        # Main Streamlit app
-│   └── simple_main_agent_ui.py  # Simple UI alternative
+│   └── full_agent_app.py        # Main Streamlit app
 ├── data/
 │   └── dummy_it_tickets.csv     # Sample ticket data
-├── check_services.py            # Service status checker
-├── verify_analytics_agent.py    # Agent verification tool
 ├── START_ALL.ps1                # PowerShell startup script
-├── START_SYSTEM.bat             # Windows batch startup
 ├── requirements.txt             # Python dependencies
 └── README.md                    # This file
 ```
@@ -321,4 +292,3 @@ For issues or questions, refer to the documentation files or check the troublesh
 ---
 
 **Enjoy your intelligent IT ticket management system!** 🎊
-

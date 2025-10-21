@@ -1,0 +1,23 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.env
+
+# Jupyter / local IDE configs
+.ipynb_checkpoints
+.vscode/
+.idea/
+
+# Data files
+dummy_it_tickets.csv
+
+# Logs
+*.log
+
+# OS-specific
+.DS_Store
+Thumbs.db
