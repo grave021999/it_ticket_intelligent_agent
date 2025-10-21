@@ -1,0 +1,7 @@
+﻿fastapi
+uvicorn
+pandas
+websockets
+asyncio
+requests
+streamlit
