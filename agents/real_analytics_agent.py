@@ -3,8 +3,9 @@ import websockets
 import json
 import time
 import logging
+import os
+from openai import OpenAI
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -13,18 +14,19 @@ class BulletproofAnalyticsAgent:
         self.agent_id = "analytics_agent"
         self.name = "Analytics Agent"
         self.a2a_server = "ws://localhost:9090"
+        self.mcp_server = "ws://localhost:8080"
         self.websocket = None
+        self.mcp_websocket = None
         self.running = False
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 10
         self.reconnect_delay = 5
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     async def create_connection(self):
-        """Create a robust WebSocket connection with proper error handling"""
         try:
             logger.info(f"Creating connection to {self.a2a_server}")
             
-            # Create connection with robust parameters
             self.websocket = await websockets.connect(
                 self.a2a_server,
                 ping_interval=20,
@@ -32,7 +34,7 @@ class BulletproofAnalyticsAgent:
                 close_timeout=5,
                 max_size=2**20,
                 open_timeout=10,
-                compression=None,  # Disable compression to avoid issues
+                compression=None,
                 subprotocols=None
             )
             
@@ -49,8 +51,46 @@ class BulletproofAnalyticsAgent:
                 self.websocket = None
             return False
 
+    async def connect_to_mcp(self):
+        try:
+            logger.info(f"Connecting to MCP server at {self.mcp_server}")
+            self.mcp_websocket = await websockets.connect(
+                self.mcp_server,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=5,
+                max_size=2**20,
+                open_timeout=10
+            )
+            logger.info("MCP server connection established")
+            
+            test_message = {
+                "jsonrpc": "2.0",
+                "id": 999,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "analytics_agent", "version": "1.0.0"}
+                }
+            }
+            
+            await self.mcp_websocket.send(json.dumps(test_message))
+            response = await asyncio.wait_for(self.mcp_websocket.recv(), timeout=5.0)
+            logger.info("MCP server connection test successful")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to connect to MCP server: {e}")
+            if self.mcp_websocket:
+                try:
+                    await self.mcp_websocket.close()
+                except:
+                    pass
+                self.mcp_websocket = None
+            return False
+
     async def register_with_a2a(self):
-        """Register the agent with A2A server"""
         try:
             if not self.websocket:
                 return False
@@ -75,13 +115,12 @@ class BulletproofAnalyticsAgent:
             await self.websocket.send(json.dumps(register_message))
             logger.info(f"Registration message sent for {self.name}")
             
-            # Wait for registration response
             response = await asyncio.wait_for(self.websocket.recv(), timeout=10.0)
             result = json.loads(response)
             
             if result.get("status") == "success":
                 logger.info(f"Successfully registered {self.name}")
-                self.reconnect_attempts = 0  # Reset on successful registration
+                self.reconnect_attempts = 0
                 return True
             else:
                 logger.error(f"Registration failed: {result.get('message')}")
@@ -95,7 +134,6 @@ class BulletproofAnalyticsAgent:
             return False
 
     async def handle_message(self, message):
-        """Handle incoming messages from A2A server"""
         try:
             data = json.loads(message)
             message_type = data.get("type")
@@ -117,7 +155,6 @@ class BulletproofAnalyticsAgent:
             logger.error(f"Error handling message: {e}")
 
     async def handle_task_delegation(self, data):
-        """Handle delegated tasks"""
         try:
             task_id = data.get("task_id")
             from_agent = data.get("from_agent")
@@ -128,10 +165,8 @@ class BulletproofAnalyticsAgent:
             logger.info(f"Processing task {task_id} from {from_agent}: {task_type}")
             logger.info(f"Query: {query}")
             
-            # Process the analytics task
             result = await self.process_analytics_task(query)
             
-            # Send completion response
             completion_message = {
                 "type": "task_completed",
                 "task_id": task_id,
@@ -146,7 +181,6 @@ class BulletproofAnalyticsAgent:
         except Exception as e:
             logger.error(f"Error handling task delegation: {e}")
             
-            # Send failure response
             try:
                 failure_message = {
                     "type": "task_failed",
@@ -160,39 +194,155 @@ class BulletproofAnalyticsAgent:
                 pass
 
     async def process_analytics_task(self, query):
-        """Process analytics tasks and return results"""
         try:
-            # Simulate analytics processing
-            await asyncio.sleep(1)
+            if not self.mcp_websocket:
+                logger.error("MCP server not connected, attempting to reconnect...")
+                if not await self.connect_to_mcp():
+                    logger.error("Failed to reconnect to MCP server")
+                    return {"error": "MCP server not connected and reconnection failed"}
+            
+            init_message = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "analytics_agent",
+                        "version": "1.0.0"
+                    }
+                }
+            }
+            
+            await self.mcp_websocket.send(json.dumps(init_message))
+            init_response = await asyncio.wait_for(self.mcp_websocket.recv(), timeout=10.0)
+            logger.info("MCP server initialized")
+            
+            tools_message = {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list"
+            }
+            
+            await self.mcp_websocket.send(json.dumps(tools_message))
+            tools_response = await asyncio.wait_for(self.mcp_websocket.recv(), timeout=10.0)
+            tools_data = json.loads(tools_response)
+            logger.info(f"Available tools: {[tool['name'] for tool in tools_data.get('result', {}).get('tools', [])]}")
+            
+            tool_to_use = self._determine_tool_for_query(query)
+            logger.info(f"Using tool: {tool_to_use}")
+            
+            if tool_to_use == "analyze_ticket_trends":
+                tool_message = {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "analyze_ticket_trends",
+                        "arguments": {"query": query}
+                    }
+                }
+            elif tool_to_use == "get_ticket_summary":
+                tool_message = {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_ticket_summary",
+                        "arguments": {}
+                    }
+                }
+            else:
+                tool_message = {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "search_tickets",
+                        "arguments": {"query": query}
+                    }
+                }
+            
+            await self.mcp_websocket.send(json.dumps(tool_message))
+            tool_response = await asyncio.wait_for(self.mcp_websocket.recv(), timeout=30.0)
+            tool_data = json.loads(tool_response)
+            
+            if "error" in tool_data:
+                logger.error(f"MCP tool error: {tool_data['error']}")
+                return {"error": f"MCP tool error: {tool_data['error']}"}
+            
+            result_content = tool_data.get("result", {}).get("content", [])
+            if result_content and len(result_content) > 0:
+                analysis_text = result_content[0].get("text", "No analysis available")
+            else:
+                analysis_text = "No analysis available"
+            
+            enhanced_analysis = await self._enhance_analysis_with_ai(query, analysis_text)
             
             result = {
                 "summary": f"Analytics completed for: '{query}'",
                 "details": {
-                    "tickets_analyzed": 150,
-                    "trend_analysis": "Network issues showing 15% increase",
-                    "top_categories": ["Network", "Email", "Hardware"],
-                    "priority_distribution": {
-                        "High": 25,
-                        "Medium": 60,
-                        "Low": 15
-                    },
-                    "recommendations": [
-                        "Focus on network infrastructure improvements",
-                        "Consider additional email support resources",
-                        "Monitor hardware failure patterns"
-                    ]
+                    "raw_analysis": analysis_text,
+                    "enhanced_analysis": enhanced_analysis,
+                    "tool_used": tool_to_use,
+                    "timestamp": time.time()
                 }
             }
             
             return result
             
+        except asyncio.TimeoutError:
+            logger.error("MCP server timeout")
+            return {"error": "MCP server timeout"}
         except Exception as e:
-            return {
-                "error": f"Analytics processing failed: {str(e)}"
-            }
+            logger.error(f"Analytics processing failed: {e}")
+            return {"error": f"Analytics processing failed: {str(e)}"}
+
+    def _determine_tool_for_query(self, query):
+        query_lower = query.lower()
+        
+        if any(word in query_lower for word in ["trend", "pattern", "analysis", "trends"]):
+            return "analyze_ticket_trends"
+        elif any(word in query_lower for word in ["summary", "overview", "statistics", "total"]):
+            return "get_ticket_summary"
+        else:
+            return "search_tickets"
+
+    async def _enhance_analysis_with_ai(self, query, raw_analysis):
+        try:
+            if not self.client:
+                return raw_analysis
+            
+            prompt = f"""
+            Based on the following IT ticket analysis data, provide insights and recommendations:
+            
+            Query: {query}
+            Raw Analysis: {raw_analysis}
+            
+            Please provide:
+            1. Key insights from the data
+            2. Trends and patterns identified
+            3. Actionable recommendations
+            4. Priority areas for improvement
+            
+            Format your response as a structured analysis.
+            """
+            
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500,
+                temperature=0.7
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"AI enhancement failed: {e}")
+            return raw_analysis
 
     async def handle_discovery_request(self):
-        """Handle discovery requests"""
         try:
             response = {
                 "type": "discovery_response",
@@ -211,7 +361,6 @@ class BulletproofAnalyticsAgent:
             logger.error(f"Error handling discovery: {e}")
 
     async def handle_ping(self):
-        """Handle ping messages"""
         try:
             pong = {"type": "pong", "timestamp": time.time()}
             await self.websocket.send(json.dumps(pong))
@@ -219,19 +368,16 @@ class BulletproofAnalyticsAgent:
             logger.error(f"Error handling ping: {e}")
 
     async def message_loop(self):
-        """Main message processing loop"""
         logger.info("Starting message loop...")
         self.running = True
         
         try:
             while self.running and self.websocket:
                 try:
-                    # Wait for messages with timeout
                     message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
                     await self.handle_message(message)
                     
                 except asyncio.TimeoutError:
-                    # No message received, continue
                     continue
                 except (websockets.ConnectionClosed, websockets.InvalidMessage, EOFError) as e:
                     logger.warning(f"Connection error: {e}")
@@ -250,27 +396,25 @@ class BulletproofAnalyticsAgent:
             logger.info("Message loop stopped")
 
     async def run(self):
-        """Main run loop with robust reconnection"""
         logger.info("Starting Bulletproof Analytics Agent...")
         
         while True:
             try:
-                # Create connection
                 if await self.create_connection():
-                    # Register with A2A
-                    if await self.register_with_a2a():
-                        # Start message loop
-                        await self.message_loop()
+                    if await self.connect_to_mcp():
+                        if await self.register_with_a2a():
+                            await self.message_loop()
+                        else:
+                            logger.error("Failed to register with A2A server")
+                            await self.cleanup_connection()
                     else:
-                        logger.error("Failed to register with A2A server")
+                        logger.error("Failed to connect to MCP server")
                         await self.cleanup_connection()
                 else:
-                    logger.error("Failed to create connection")
+                    logger.error("Failed to create A2A connection")
                 
-                # If we reach here, connection was lost
                 await self.cleanup_connection()
                 
-                # Reconnection logic
                 if self.reconnect_attempts < self.max_reconnect_attempts:
                     self.reconnect_attempts += 1
                     logger.info(f"Attempting reconnection {self.reconnect_attempts}/{self.max_reconnect_attempts} in {self.reconnect_delay} seconds...")
@@ -288,13 +432,19 @@ class BulletproofAnalyticsAgent:
                 await asyncio.sleep(self.reconnect_delay)
 
     async def cleanup_connection(self):
-        """Clean up WebSocket connection"""
         if self.websocket:
             try:
                 await self.websocket.close()
             except:
                 pass
             self.websocket = None
+        
+        if self.mcp_websocket:
+            try:
+                await self.mcp_websocket.close()
+            except:
+                pass
+            self.mcp_websocket = None
 
 async def main():
     agent = BulletproofAnalyticsAgent()

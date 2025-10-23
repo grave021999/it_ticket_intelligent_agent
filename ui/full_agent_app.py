@@ -9,7 +9,7 @@ from openai import OpenAI
 
 st.set_page_config(
     page_title="IT Ticket AI System",
-    page_icon="🎟️",
+    page_icon="📋",
     layout="wide"
 )
 
@@ -20,7 +20,6 @@ class AgentUIManager:
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     async def cleanup_connections(self):
-        """Properly close all WebSocket connections"""
         try:
             if self.a2a_websocket:
                 await self.a2a_websocket.close()
@@ -37,7 +36,6 @@ class AgentUIManager:
         
     async def connect_to_a2a(self):
         try:
-            # Close existing connection if any
             if self.a2a_websocket:
                 try:
                     await self.a2a_websocket.close()
@@ -61,7 +59,6 @@ class AgentUIManager:
     
     async def connect_to_mcp(self):
         try:
-            # Close existing connection if any
             if self.mcp_websocket:
                 try:
                     await self.mcp_websocket.close()
@@ -77,7 +74,6 @@ class AgentUIManager:
                 max_size=2**20,
                 open_timeout=5
             )
-            # Initialize MCP connection
             init_message = {
                 "jsonrpc": "2.0",
                 "method": "initialize",
@@ -126,7 +122,6 @@ class AgentUIManager:
                 return {"error": "Could not connect to A2A server"}
         
         try:
-            # First discover available agents
             agents = await self.discover_agents()
             analytics_agent = None
             
@@ -136,11 +131,9 @@ class AgentUIManager:
                     break
             
             if not analytics_agent:
-                # Fallback to MCP trend analysis
                 st.warning("Analytics Agent not available, using MCP trend analysis...")
                 return await self._fallback_trend_analysis(query)
             
-            # Delegate task to analytics agent
             task_message = {
                 "type": "delegate_task",
                 "from_agent": "ui_manager",
@@ -153,24 +146,20 @@ class AgentUIManager:
             
             await self.a2a_websocket.send(json.dumps(task_message))
             
-            # Wait for response with timeout
             try:
                 response = await asyncio.wait_for(self.a2a_websocket.recv(), timeout=3.0)
                 result = json.loads(response)
                 
                 if result.get("status") == "success":
-                    # Wait for task completion
                     task_id = result.get("task_id")
                     completion_result = await self._wait_for_task_completion(task_id)
                     
-                    # If task completion failed, try fallback
                     if "error" in completion_result:
                         st.warning(f"Analytics Agent task failed: {completion_result['error']}. Using fallback...")
                         return await self._fallback_trend_analysis(query)
                     
                     return completion_result
                 else:
-                    # Fallback to MCP trend analysis
                     st.warning(f"Task delegation failed: {result.get('message')}. Using fallback...")
                     return await self._fallback_trend_analysis(query)
             except asyncio.TimeoutError:
@@ -178,14 +167,11 @@ class AgentUIManager:
                 return await self._fallback_trend_analysis(query)
                 
         except Exception as e:
-            # Fallback to MCP trend analysis
             st.warning(f"Analytics Agent error: {e}. Using fallback...")
             return await self._fallback_trend_analysis(query)
     
     async def _fallback_trend_analysis(self, query: str) -> Dict[str, Any]:
-        """Fallback trend analysis using MCP server directly"""
         try:
-            # Use MCP server for trend analysis
             result = await self.execute_mcp_tool("analyze_ticket_trends", {"query": query})
             if "error" not in result:
                 return {
@@ -195,7 +181,6 @@ class AgentUIManager:
                     "query": query
                 }
             else:
-                # Try search_tickets as alternative
                 search_result = await self.execute_mcp_tool("search_tickets", {"query": query})
                 if "error" not in search_result:
                     return {
@@ -205,30 +190,25 @@ class AgentUIManager:
                         "query": query
                     }
                 else:
-                    # Final fallback to AI direct response
                     return await self._ai_direct_response(query)
         except Exception as e:
             return await self._ai_direct_response(query)
     
     async def _wait_for_task_completion(self, task_id: str) -> Dict[str, Any]:
         try:
-            import asyncio
             
-            # Set timeout for waiting for task completion
-            timeout = 15  # 15 seconds timeout
-            poll_interval = 0.5  # Poll every 0.5 seconds
+            timeout = 15
+            poll_interval = 0.5
             
             start_time = time.time()
             while time.time() - start_time < timeout:
                 try:
-                    # Poll for task status
                     status_message = {
                         "type": "task_status",
                         "task_id": task_id
                     }
                     await self.a2a_websocket.send(json.dumps(status_message))
                     
-                    # Wait for status response
                     response = await asyncio.wait_for(self.a2a_websocket.recv(), timeout=2.0)
                     data = json.loads(response)
                     
@@ -244,18 +224,14 @@ class AgentUIManager:
                             }
                         elif task_status == "failed":
                             return {"error": "Task execution failed"}
-                        # If still pending or in_progress, continue polling
                     
-                    # Wait before next poll
                     await asyncio.sleep(poll_interval)
                         
                 except asyncio.TimeoutError:
-                    # Continue polling
                     continue
                 except (websockets.exceptions.ConnectionClosed, websockets.exceptions.InvalidMessage, EOFError):
                     return {"error": "Connection lost while waiting for task completion"}
                     
-            # If we reach here, timeout occurred
             return {"error": f"Task {task_id} timed out after {timeout} seconds"}
                     
         except Exception as e:
@@ -291,13 +267,11 @@ class AgentUIManager:
     async def process_user_query(self, query: str) -> Dict[str, Any]:
         query_lower = query.lower()
         
-        # Check if query needs analytics agent
         if any(word in query_lower for word in ["trend", "analysis", "analyze", "pattern", "insight", "report"]):
             result = await self.delegate_to_analytics_agent(query)
             if "error" not in result:
                 return result
         
-        # Check if query needs summary
         if any(word in query_lower for word in ["summary", "overview", "statistics", "total"]):
             result = await self.execute_mcp_tool("get_ticket_summary", {})
             if "error" not in result:
@@ -308,7 +282,6 @@ class AgentUIManager:
                     "query": query
                 }
         
-        # Check if query needs search
         if any(word in query_lower for word in ["search", "find", "show", "list", "tickets"]):
             result = await self.execute_mcp_tool("search_tickets", {"query": query})
             if "error" not in result:
@@ -319,7 +292,6 @@ class AgentUIManager:
                     "query": query
                 }
         
-        # Fallback to AI direct response
         return await self._ai_direct_response(query)
     
     async def _ai_direct_response(self, query: str) -> Dict[str, Any]:
@@ -370,22 +342,23 @@ class AgentUIManager:
             }
     
     async def _convert_analytics_to_natural_language(self, analytics_result: Dict[str, Any], query: str) -> str:
-        """Convert analytics agent results to natural, conversational language"""
         try:
-            # Extract the analytics data
             summary = analytics_result.get("summary", "")
             details = analytics_result.get("details", {})
             
-            # Create a rich context for the AI
+            raw_analysis = details.get("raw_analysis", "")
+            enhanced_analysis = details.get("enhanced_analysis", "")
+            tool_used = details.get("tool_used", "unknown")
+            
             context = f"""
             Summary: {summary}
+            Tool Used: {tool_used}
             
-            Detailed Analytics:
-            - Tickets Analyzed: {details.get('tickets_analyzed', 'N/A')}
-            - Trend Analysis: {details.get('trend_analysis', 'N/A')}
-            - Top Categories: {', '.join(details.get('top_categories', []))}
-            - Priority Distribution: {details.get('priority_distribution', {})}
-            - Recommendations: {details.get('recommendations', [])}
+            Raw Analysis Data:
+            {raw_analysis}
+            
+            AI-Enhanced Analysis:
+            {enhanced_analysis}
             """
             
             conversion_prompt = f"""
@@ -398,12 +371,13 @@ class AgentUIManager:
             
             Please provide a clear, conversational explanation of these analytics results. 
             Structure your response naturally:
-            1. Start with a brief overview
-            2. Explain the key trends and patterns
-            3. Highlight the important statistics
-            4. Share the actionable recommendations
+            1. Start with a brief overview of what was found
+            2. Explain the key trends and patterns from the data
+            3. Highlight the important statistics and numbers
+            4. Share the actionable recommendations and insights
             
             Use natural language, be friendly and professional, and make it easy to understand.
+            Focus on the real data and insights provided, not generic responses.
             """
             
             response = self.client.chat.completions.create(
@@ -419,7 +393,6 @@ class AgentUIManager:
             return response.choices[0].message.content.strip()
                 
         except Exception as e:
-            # Fallback to a simpler explanation if AI conversion fails
             summary = analytics_result.get("summary", "")
             details = analytics_result.get("details", {})
             
@@ -489,10 +462,8 @@ class AgentUIManager:
         except:
             pass
         
-        # Check if analytics agent is available (simplified check)
         try:
             if self.a2a_websocket:
-                # Use existing connection to check agents
                 agents = await self.discover_agents()
                 for agent in agents:
                     if agent.get("agent_id") == "analytics_agent":
@@ -512,7 +483,6 @@ def main():
     if 'query_history' not in st.session_state:
         st.session_state.query_history = []
     
-    # Simple input section
     query = st.text_input(
         "What would you like to know about your tickets?",
         placeholder="e.g., 'Show me network issues' or 'Analyze trends in high priority tickets'",
@@ -546,16 +516,13 @@ def main():
                             elif approach == "analytics_agent":
                                 analytics_result = result.get("result", {})
                                 
-                                # Convert analytics result to natural language
                                 natural_response = loop.run_until_complete(
                                     ui_manager._convert_analytics_to_natural_language(analytics_result, query)
                                 )
                                 st.write(natural_response)
                             elif approach in ["summary", "search", "mcp_trend_analysis", "mcp_search"]:
-                                # Handle all MCP-based responses
                                 mcp_result = result.get("result", {})
                                 
-                                # Convert to natural language using existing loop
                                 natural_response = loop.run_until_complete(ui_manager._convert_to_natural_language(mcp_result, query))
                                 st.write(natural_response)
                             else:
@@ -565,7 +532,6 @@ def main():
                 except Exception as e:
                     st.error(f"Error processing query: {e}")
                 finally:
-                    # Always cleanup connections and event loop
                     try:
                         if loop:
                             loop.run_until_complete(ui_manager.cleanup_connections())
@@ -575,7 +541,6 @@ def main():
         else:
             st.warning("Please enter a question")
     
-    # Simple conversation history
     if st.session_state.query_history:
         st.markdown("---")
         st.subheader("Recent Questions")

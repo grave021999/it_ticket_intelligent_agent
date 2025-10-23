@@ -8,15 +8,10 @@ class MainAgent:
         self.agent_id = "main_agent"
         self.name = "Main Agent"
         self.a2a_server = "ws://localhost:9090"
-        self.mcp_server = "ws://localhost:8080"
         self.a2a_ws = None
-        self.mcp_ws = None
         self.agents = {}
         self.task_responses = {}
 
-    # ---------------------------------------------------
-    # 🧩 Connect to A2A
-    # ---------------------------------------------------
     async def connect_a2a(self):
         try:
             self.a2a_ws = await websockets.connect(self.a2a_server)
@@ -33,21 +28,16 @@ class MainAgent:
                 "endpoint": "ws://localhost:9100",
             }
             await self.a2a_ws.send(json.dumps(reg))
-            print("✅ Registered Main Agent on A2A")
+            print("Registered Main Agent on A2A")
 
-            # Start background listener
             asyncio.create_task(self.listen_a2a())
 
-            # Ask for agents (no recv here — handled by listener)
             await self.a2a_ws.send(json.dumps({"type": "discover_agents"}))
         except Exception as e:
-            print("❌ Failed to connect to A2A:", e)
+            print("Failed to connect to A2A:", e)
 
-    # ---------------------------------------------------
-    # 🧩 Listen for all A2A messages
-    # ---------------------------------------------------
     async def listen_a2a(self):
-        print("📡 Listening for A2A messages...")
+        print("Listening for A2A messages...")
         try:
             while True:
                 msg = await self.a2a_ws.recv()
@@ -56,24 +46,21 @@ class MainAgent:
                 if data.get("status") == "success" and data.get("agents"):
                     for a in data["agents"]:
                         self.agents[a["agent_id"]] = a
-                    print("✅ Agents discovered:", list(self.agents.keys()))
+                    print("Agents discovered:", list(self.agents.keys()))
 
                 elif data.get("type") == "task_completed":
                     self.task_responses[data["task_id"]] = data
-                    print(f"✅ Task completed from {data.get('from_agent')}")
+                    print(f"Task completed from {data.get('from_agent')}")
 
         except websockets.ConnectionClosed:
-            print("⚠️ A2A connection lost — reconnecting...")
+            print("A2A connection lost — reconnecting...")
             await asyncio.sleep(2)
             await self.connect_a2a()
 
-    # ---------------------------------------------------
-    # 🧩 Delegate task to analytics agent
-    # ---------------------------------------------------
     async def delegate_task(self, query: str):
         analytics = [a for a in self.agents if "analytics_agent" in a]
         if not analytics:
-            print("⚠️ No analytics agent found.")
+            print("No analytics agent found.")
             return None
 
         target = analytics[0]
@@ -88,22 +75,18 @@ class MainAgent:
         }
 
         await self.a2a_ws.send(json.dumps(task))
-        print(f"📤 Sent task '{query}' to {target}")
+        print(f"Sent task '{query}' to {target}")
 
-        # Wait up to 20 seconds for result
         for _ in range(20):
             if task_id in self.task_responses:
                 result = self.task_responses[task_id]["result"]
-                print("📥 Received result:", json.dumps(result, indent=2))
+                print("Received result:", json.dumps(result, indent=2))
                 return result
             await asyncio.sleep(1)
 
         print("⏰ Timeout waiting for Analytics Agent response.")
         return None
 
-    # ---------------------------------------------------
-    # 🧩 Entry loop
-    # ---------------------------------------------------
     async def run(self):
         await self.connect_a2a()
         await asyncio.sleep(2)
@@ -114,10 +97,10 @@ class MainAgent:
                 break
             result = await self.delegate_task(query)
             if result:
-                print("\n🧠 Analysis Result:")
+                print("\nAnalysis Result:")
                 print(result["summary"])
             else:
-                print("⚠️ No response received.")
+                print("No response received.")
 
 
 if __name__ == "__main__":

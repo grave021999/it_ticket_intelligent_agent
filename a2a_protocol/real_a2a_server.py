@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""
-Fixed A2A Server - simplified version that works
-"""
 import asyncio
 import json
 import websockets
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Any
+from dataclasses import dataclass
 from datetime import datetime
 import uuid
 
@@ -29,8 +26,8 @@ class A2ATask:
     payload: Dict[str, Any]
     status: str
     created_at: datetime
-    completed_at: Optional[datetime] = None
-    result: Optional[Dict[str, Any]] = None
+    completed_at: datetime = None
+    result: Dict[str, Any] = None
 
 class A2AServer:
     def __init__(self):
@@ -58,7 +55,7 @@ class A2AServer:
             "message": f"Agent {agent.name} registered successfully"
         }
     
-    async def discover_agents(self, capability_filter: Optional[str] = None) -> Dict[str, Any]:
+    async def discover_agents(self, capability_filter: str = None) -> Dict[str, Any]:
         available_agents = []
         for agent in self.agents.values():
             if agent.status == "available":

@@ -1,7 +1,7 @@
 import json
 import asyncio
 import websockets
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dataclasses import dataclass
 import pandas as pd
 import os
@@ -242,30 +242,78 @@ class MCPServer:
         
         query_lower = query.lower()
         
+        target_category = None
         if "email" in query_lower:
-            email_tickets = self.df[self.df['category'] == 'Email']
-            trend_text = f"Email Issues Analysis:\n\n"
-            trend_text += f"Total Email tickets: {len(email_tickets)}\n"
+            target_category = "Email"
+        elif "network" in query_lower:
+            target_category = "Network"
+        elif "hardware" in query_lower:
+            target_category = "Hardware"
+        elif "software" in query_lower:
+            target_category = "Software"
+        elif "access" in query_lower:
+            target_category = "Access"
+        
+        if target_category:
+            category_tickets = self.df[self.df['category'] == target_category]
+            trend_text = f"{target_category} Issues Analysis:\n\n"
+            trend_text += f"Total {target_category} tickets: {len(category_tickets)}\n"
             
-            if len(email_tickets) > 0:
-                status_breakdown = email_tickets['status'].value_counts()
+            if len(category_tickets) > 0:
+                status_breakdown = category_tickets['status'].value_counts()
                 trend_text += "\nStatus breakdown:\n"
                 for status, count in status_breakdown.items():
-                    trend_text += f"- {status}: {count}\n"
+                    percentage = (count / len(category_tickets)) * 100
+                    trend_text += f"- {status}: {count} ({percentage:.1f}%)\n"
                 
-                priority_breakdown = email_tickets['priority'].value_counts()
+                priority_breakdown = category_tickets['priority'].value_counts()
                 trend_text += "\nPriority breakdown:\n"
                 for priority, count in priority_breakdown.items():
-                    trend_text += f"- {priority}: {count}\n"
+                    percentage = (count / len(category_tickets)) * 100
+                    trend_text += f"- {priority}: {count} ({percentage:.1f}%)\n"
                 
-                trend_text += f"\nMost common issues:\n"
-                common_issues = email_tickets['description'].value_counts().head(5)
+                trend_text += f"\nMost common {target_category.lower()} issues:\n"
+                common_issues = category_tickets['description'].value_counts().head(5)
                 for issue, count in common_issues.items():
                     trend_text += f"- {issue}: {count} occurrences\n"
+                
+                assignee_breakdown = category_tickets['assigned_to'].value_counts().head(5)
+                trend_text += f"\nTop assignees for {target_category} issues:\n"
+                for assignee, count in assignee_breakdown.items():
+                    trend_text += f"- {assignee}: {count} tickets\n"
+            else:
+                trend_text += f"No {target_category} tickets found in the dataset.\n"
             
             return {"content": [{"type": "text", "text": trend_text}]}
-        
-        return {"content": [{"type": "text", "text": "Trend analysis completed"}]}
+        else:
+            total_tickets = len(self.df)
+            trend_text = f"Overall Ticket Trends Analysis:\n\n"
+            trend_text += f"Total tickets analyzed: {total_tickets}\n\n"
+            
+            category_counts = self.df['category'].value_counts()
+            trend_text += "Category Distribution:\n"
+            for category, count in category_counts.items():
+                percentage = (count / total_tickets) * 100
+                trend_text += f"- {category}: {count} ({percentage:.1f}%)\n"
+            
+            status_counts = self.df['status'].value_counts()
+            trend_text += "\nStatus Distribution:\n"
+            for status, count in status_counts.items():
+                percentage = (count / total_tickets) * 100
+                trend_text += f"- {status}: {count} ({percentage:.1f}%)\n"
+            
+            priority_counts = self.df['priority'].value_counts()
+            trend_text += "\nPriority Distribution:\n"
+            for priority, count in priority_counts.items():
+                percentage = (count / total_tickets) * 100
+                trend_text += f"- {priority}: {count} ({percentage:.1f}%)\n"
+            
+            assignee_counts = self.df['assigned_to'].value_counts().head(5)
+            trend_text += "\nTop 5 Assignees:\n"
+            for assignee, count in assignee_counts.items():
+                trend_text += f"- {assignee}: {count} tickets\n"
+            
+            return {"content": [{"type": "text", "text": trend_text}]}
     
     def _analyze_workload(self) -> str:
         workload = self.df['assigned_to'].value_counts()
