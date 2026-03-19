@@ -1,3 +1,4 @@
+<img width="1280" height="579" alt="banner" src="https://github.com/user-attachments/assets/e4964701-9f03-4eba-ada1-b3052827b194" />
 # 🎟️ IT Ticket AI System
 
 A multi-agent AI system for intelligent IT ticket management with natural language processing, trend analysis, and automated insights.
